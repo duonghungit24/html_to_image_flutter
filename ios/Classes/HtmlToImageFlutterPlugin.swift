@@ -397,11 +397,8 @@ public class HtmlToImageFlutterPlugin: NSObject, FlutterPlugin {
             return
         }
 
-        // delay in ms (fallback) - used as maximum wait for images load
         let delayMs = arguments["delay"] as? Double ?? 800.0
-
-        // optional: target print width in pixels (for 58/72/80mm)
-        let targetWidthPx = arguments["targetWidthPx"] as? CGFloat ?? 384
+        let targetWidthPx = arguments["targetWidthPx"] as? CGFloat ?? 384 // mặc định 58mm in ~384px
 
         switch call.method {
         case "convertToImage":
@@ -414,7 +411,6 @@ public class HtmlToImageFlutterPlugin: NSObject, FlutterPlugin {
     private func createAndLoadWebView(htmlContent: String, maxDelayMs: Double, targetWidthPx: CGFloat, flutterResult: @escaping FlutterResult) {
         dispose()
 
-        // configure webView
         let config = WKWebViewConfiguration()
         config.suppressesIncrementalRendering = false
 
@@ -425,10 +421,8 @@ public class HtmlToImageFlutterPlugin: NSObject, FlutterPlugin {
         wk.scrollView.backgroundColor = .white
         wk.scrollView.isScrollEnabled = false
         wk.translatesAutoresizingMaskIntoConstraints = false
-
         self.webView = wk
 
-        // Wrap content in minimal html with viewport and reset styles
         let htmlWithViewport = """
         <html>
         <head>
@@ -446,16 +440,12 @@ public class HtmlToImageFlutterPlugin: NSObject, FlutterPlugin {
         </html>
         """
 
-        // load html
         wk.loadHTMLString(htmlWithViewport, baseURL: nil)
-
-        // store callback and params
         pendingResult = flutterResult
         pendingMaxDelayMs = maxDelayMs
         pendingTargetWidthPx = targetWidthPx
     }
 
-    // MARK: - Helpers & state
     private var pendingResult: FlutterResult? = nil
     private var pendingMaxDelayMs: Double = 800.0
     private var pendingTargetWidthPx: CGFloat = 384
@@ -470,7 +460,6 @@ public class HtmlToImageFlutterPlugin: NSObject, FlutterPlugin {
         pendingResult = nil
     }
 
-    // Ensure HTML inserted does not accidentally break JS string if already contains </body> etc.
     private func htmlEscapeIfNeeded(htmlWith html: String) -> String {
         let trimmed = html.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.lowercased().hasPrefix("<!doctype") || trimmed.lowercased().hasPrefix("<html") {
@@ -480,7 +469,6 @@ public class HtmlToImageFlutterPlugin: NSObject, FlutterPlugin {
         }
     }
 
-    // Crop bottom white space from UIImage by scanning pixels row-by-row
     private func cropBottomWhite(from image: UIImage, whiteThreshold: UInt8 = 245, padding: Int = 2) -> UIImage {
         guard let cgImage = image.cgImage else { return image }
         let width = cgImage.width
@@ -575,7 +563,7 @@ extension HtmlToImageFlutterPlugin: WKNavigationDelegate {
 
                     let readyOK = (ready == "complete" || ready == "interactive")
                     if readyOK && imgsComplete {
-                        // scale content vừa khổ in
+                        // tính scale để fit targetWidth
                         let scale = targetWidth / widthFloat
                         let scaleJS = """
                         document.body.style.transformOrigin = 'top left';
@@ -583,7 +571,10 @@ extension HtmlToImageFlutterPlugin: WKNavigationDelegate {
                         document.body.style.width = '\(widthFloat)px';
                         """
                         webView.evaluateJavaScript(scaleJS) { _, _ in
-                            self.takeSnapshot(webView: webView, contentWidth: widthFloat * scale, contentHeight: heightFloat * scale, flutterResult: flutterResult)
+                            self.takeSnapshot(webView: webView,
+                                              contentWidth: widthFloat * scale,
+                                              contentHeight: heightFloat * scale,
+                                              flutterResult: flutterResult)
                         }
                         return
                     }
@@ -591,7 +582,10 @@ extension HtmlToImageFlutterPlugin: WKNavigationDelegate {
 
                 if Date().timeIntervalSince(start) > timeout {
                     let fallbackSize = webView.scrollView.contentSize
-                    self.takeSnapshot(webView: webView, contentWidth: fallbackSize.width, contentHeight: fallbackSize.height, flutterResult: flutterResult)
+                    self.takeSnapshot(webView: webView,
+                                      contentWidth: fallbackSize.width,
+                                      contentHeight: fallbackSize.height,
+                                      flutterResult: flutterResult)
                     return
                 }
 
