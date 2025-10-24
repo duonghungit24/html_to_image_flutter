@@ -337,6 +337,11 @@
 //         let maxHeight: CGFloat = 4000
 //         if height > maxHeight { height = maxHeight }
 
+//         let targetPrinterWidth: CGFloat = 384.0
+//         let scaleFactor = targetPrinterWidth / width
+//         width *= scaleFactor
+//         height *= scaleFactor
+
 //         // set frame to measured size
 //         webView.frame = CGRect(x: 0, y: 0, width: width, height: height)
 
@@ -375,6 +380,7 @@
 // }
 
 
+
 import Flutter
 import UIKit
 import WebKit
@@ -397,20 +403,23 @@ public class HtmlToImageFlutterPlugin: NSObject, FlutterPlugin {
             return
         }
 
+        // delay in ms (fallback) - used as maximum wait for images load
         let delayMs = arguments["delay"] as? Double ?? 800.0
-        let targetWidthPx = arguments["targetWidthPx"] as? CGFloat ?? 384 // mặc định 58mm in ~384px
+        // Target width in pixels (e.g., 384 for 58mm printer); 0 means no scaling, use content size
+        let targetWidthPx = arguments["width"] as? Double ?? 0.0
 
         switch call.method {
         case "convertToImage":
-            createAndLoadWebView(htmlContent: content, maxDelayMs: delayMs, targetWidthPx: targetWidthPx, flutterResult: result)
+            createAndLoadWebView(htmlContent: content, targetWidthPx: targetWidthPx, maxDelayMs: delayMs, flutterResult: result)
         default:
             result(FlutterMethodNotImplemented)
         }
     }
 
-    private func createAndLoadWebView(htmlContent: String, maxDelayMs: Double, targetWidthPx: CGFloat, flutterResult: @escaping FlutterResult) {
+    private func createAndLoadWebView(htmlContent: String, targetWidthPx: Double, maxDelayMs: Double, flutterResult: @escaping FlutterResult) {
         dispose()
 
+        // configure webView
         let config = WKWebViewConfiguration()
         config.suppressesIncrementalRendering = false
 
@@ -421,8 +430,10 @@ public class HtmlToImageFlutterPlugin: NSObject, FlutterPlugin {
         wk.scrollView.backgroundColor = .white
         wk.scrollView.isScrollEnabled = false
         wk.translatesAutoresizingMaskIntoConstraints = false
+
         self.webView = wk
 
+        // Wrap content in minimal html with viewport and reset styles
         let htmlWithViewport = """
         <html>
         <head>
@@ -440,15 +451,19 @@ public class HtmlToImageFlutterPlugin: NSObject, FlutterPlugin {
         </html>
         """
 
+        // load html
         wk.loadHTMLString(htmlWithViewport, baseURL: nil)
+
+        // store callback in an associated object via delegation (we'll call it after navigation didFinish)
         pendingResult = flutterResult
         pendingMaxDelayMs = maxDelayMs
         pendingTargetWidthPx = targetWidthPx
     }
 
+    // MARK: - Helpers & state
     private var pendingResult: FlutterResult? = nil
     private var pendingMaxDelayMs: Double = 800.0
-    private var pendingTargetWidthPx: CGFloat = 384
+    private var pendingTargetWidthPx: Double = 0.0  // New: store target width
 
     private func dispose() {
         if let wk = self.webView {
@@ -458,9 +473,12 @@ public class HtmlToImageFlutterPlugin: NSObject, FlutterPlugin {
             self.webView = nil
         }
         pendingResult = nil
+        pendingTargetWidthPx = 0.0
     }
 
+    // Ensure HTML inserted does not accidentally break JS string if already contains </body> etc.
     private func htmlEscapeIfNeeded(htmlWith html: String) -> String {
+        // If html likely already a full document (starts with <!DOCTYPE or <html), insert as-is.
         let trimmed = html.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.lowercased().hasPrefix("<!doctype") || trimmed.lowercased().hasPrefix("<html") {
             return html
@@ -469,6 +487,7 @@ public class HtmlToImageFlutterPlugin: NSObject, FlutterPlugin {
         }
     }
 
+    // Crop bottom white space from UIImage by scanning pixels row-by-row
     private func cropBottomWhite(from image: UIImage, whiteThreshold: UInt8 = 245, padding: Int = 2) -> UIImage {
         guard let cgImage = image.cgImage else { return image }
         let width = cgImage.width
@@ -491,6 +510,7 @@ public class HtmlToImageFlutterPlugin: NSObject, FlutterPlugin {
 
         let ptr = pixelBuffer.bindMemory(to: UInt8.self, capacity: width * height * bytesPerPixel)
 
+        // scan from bottom up to find first non-white row
         var cropBottom = height
         outer: for row in stride(from: height - 1, through: 0, by: -1) {
             let rowStart = row * bytesPerRow
@@ -500,6 +520,7 @@ public class HtmlToImageFlutterPlugin: NSObject, FlutterPlugin {
                 let g = ptr[idx + 1]
                 let b = ptr[idx + 2]
                 let a = ptr[idx + 3]
+                // treat pixel as non-white if alpha significant and any channel below threshold
                 if a > 10 && (r < whiteThreshold || g < whiteThreshold || b < whiteThreshold) {
                     cropBottom = row + 1
                     break outer
@@ -507,9 +528,11 @@ public class HtmlToImageFlutterPlugin: NSObject, FlutterPlugin {
             }
         }
 
+        // safety: if cropBottom equals height -> no crop; else crop and return new UIImage
         if cropBottom >= height {
             return image
         } else {
+            // add small padding
             let finalBottom = max(1, cropBottom - padding)
             let cropRect = CGRect(x: 0, y: 0, width: width, height: finalBottom)
             if let croppedCg = cgImage.cropping(to: cropRect) {
@@ -525,17 +548,19 @@ public class HtmlToImageFlutterPlugin: NSObject, FlutterPlugin {
 extension HtmlToImageFlutterPlugin: WKNavigationDelegate {
 
     public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        // Called when initial load finished. Now wait for images/resources to be loaded (poll JS), or timeout.
         guard let result = pendingResult else { return }
         let maxDelay = pendingMaxDelayMs
-        let targetWidth = pendingTargetWidthPx
-        waitForImagesLoadAndSnapshot(webView: webView, maxDelayMs: maxDelay, targetWidth: targetWidth, flutterResult: result)
+        let targetWidthPx = pendingTargetWidthPx
+        waitForImagesLoadAndSnapshot(webView: webView, targetWidthPx: targetWidthPx, maxDelayMs: maxDelay, flutterResult: result)
     }
 
-    private func waitForImagesLoadAndSnapshot(webView: WKWebView, maxDelayMs: Double, targetWidth: CGFloat, flutterResult: @escaping FlutterResult) {
+    private func waitForImagesLoadAndSnapshot(webView: WKWebView, targetWidthPx: Double, maxDelayMs: Double, flutterResult: @escaping FlutterResult) {
         let start = Date()
         let timeout = maxDelayMs / 1000.0
 
         func checkAndProceed() {
+            // JS to check: document.readyState and all images complete
             let checkJS = """
             (function() {
               var imgs = Array.from(document.images || []);
@@ -551,6 +576,7 @@ extension HtmlToImageFlutterPlugin: WKNavigationDelegate {
                    let widthVal = dict["width"],
                    let heightVal = dict["height"] {
 
+                    // parse sizes as numbers
                     var widthFloat: CGFloat = 0
                     var heightFloat: CGFloat = 0
                     if let w = widthVal as? CGFloat { widthFloat = w }
@@ -563,64 +589,71 @@ extension HtmlToImageFlutterPlugin: WKNavigationDelegate {
 
                     let readyOK = (ready == "complete" || ready == "interactive")
                     if readyOK && imgsComplete {
-                        // tính scale để fit targetWidth
-                        let scale = targetWidth / widthFloat
-                        let scaleJS = """
-                        document.body.style.transformOrigin = 'top left';
-                        document.body.style.transform = 'scale(\(scale))';
-                        document.body.style.width = '\(widthFloat)px';
-                        """
-                        webView.evaluateJavaScript(scaleJS) { _, _ in
-                            self.takeSnapshot(webView: webView,
-                                              contentWidth: widthFloat * scale,
-                                              contentHeight: heightFloat * scale,
-                                              flutterResult: flutterResult)
-                        }
+                        // proceed to snapshot with measured width/height
+                        self.takeSnapshot(webView: webView, contentWidth: widthFloat, contentHeight: heightFloat, targetWidthPx: targetWidthPx, flutterResult: flutterResult)
                         return
                     }
                 }
 
+                // timeout check
                 if Date().timeIntervalSince(start) > timeout {
+                    // fallback: take snapshot with scrollView.contentSize if JS check didn't pass
                     let fallbackSize = webView.scrollView.contentSize
-                    self.takeSnapshot(webView: webView,
-                                      contentWidth: fallbackSize.width,
-                                      contentHeight: fallbackSize.height,
-                                      flutterResult: flutterResult)
+                    self.takeSnapshot(webView: webView, contentWidth: fallbackSize.width, contentHeight: fallbackSize.height, targetWidthPx: targetWidthPx, flutterResult: flutterResult)
                     return
                 }
 
+                // retry after small delay
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
                     checkAndProceed()
                 }
             }
         }
 
+        // initial slight delay then check
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
             checkAndProceed()
         }
     }
 
-    private func takeSnapshot(webView: WKWebView, contentWidth: CGFloat, contentHeight: CGFloat, flutterResult: @escaping FlutterResult) {
+    private func takeSnapshot(webView: WKWebView, contentWidth: CGFloat, contentHeight: CGFloat, targetWidthPx: Double, flutterResult: @escaping FlutterResult) {
+        // defensive: ensure reasonable size
         var width = max(1, contentWidth)
         var height = max(1, contentHeight)
+
+        // cap max height to avoid huge images (optional) - you can adjust or remove
         let maxHeight: CGFloat = 4000
         if height > maxHeight { height = maxHeight }
+
+        // Use passed target width if >0, else no scaling (keep original)
+        let targetPrinterWidth: CGFloat = targetWidthPx > 0 ? CGFloat(targetWidthPx) : width
+        let scaleFactor = targetPrinterWidth / width
+        width *= scaleFactor
+        height *= scaleFactor
+
+        // set frame to measured size
         webView.frame = CGRect(x: 0, y: 0, width: width, height: height)
 
         let configuration = WKSnapshotConfiguration()
         configuration.rect = CGRect(x: 0, y: 0, width: width, height: height)
         configuration.snapshotWidth = NSNumber(value: Float(width))
 
+        // take snapshot on main thread
         DispatchQueue.main.async {
             webView.takeSnapshot(with: configuration) { [weak self] (image, error) in
                 guard let strongSelf = self else { return }
                 guard let image = image else {
+                    // return empty bytes or error
+                    let empty = FlutterStandardTypedData(bytes: Data())
                     flutterResult(FlutterError(code: "SNAPSHOT_FAILED", message: error?.localizedDescription ?? "Snapshot failed", details: nil))
                     strongSelf.dispose()
                     return
                 }
 
+                // crop bottom white if needed
                 let cropped = strongSelf.cropBottomWhite(from: image, whiteThreshold: 245, padding: 2)
+
+                // convert to jpeg (you can choose PNG if you prefer)
                 guard let data = cropped.jpegData(compressionQuality: 1.0) else {
                     flutterResult(FlutterError(code: "ENCODE_FAILED", message: "Cannot encode image", details: nil))
                     strongSelf.dispose()

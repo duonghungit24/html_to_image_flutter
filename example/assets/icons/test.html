@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hóa Đơn PCT Badminton</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;500;600;700&display=swap"
+        rel="stylesheet" />
+    <style>
+        body {
+            font-family: 'Open Sans', sans-serif;
+            background-color: #ffffff;
+            color: #000;
+            margin: 0;
+            padding: 0;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            image-rendering: -webkit-optimize-contrast;
+            -webkit-font-smoothing: none;
+            font-smooth: never;
+            text-rendering: geometricPrecision;
+        }
+
+        .invoice-container {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 0;
+        }
+
+        .title {
+            font-size: 18px;
+            font-weight: 700;
+            text-align: center;
+            margin: 8px auto;
+            color: #000;
+        }
+
+        .header {
+            text-align: center;
+            color: #000;
+            margin: 10px auto 0;
+        }
+
+        .header h1 {
+            font-size: 18px;
+            font-weight: 700;
+            text-transform: uppercase;
+            margin-bottom: 0;
+        }
+
+        .header .logo {
+            width: auto;
+            max-height: 90px;
+            margin: 6px auto 0;
+            image-rendering: crisp-edges;
+        }
+
+        .info-section {
+            margin-top: 0.2rem;
+            color: #000;
+            padding: 0 0.4rem;
+            font-weight: 500;
+        }
+
+        .info-section p {
+            margin: 0.25rem 0;
+            font-size: 14px;
+        }
+
+        /* TABLE */
+        .table-section {
+            width: 98%;
+            margin: 0.6rem auto 0;
+            border-collapse: collapse;
+            border: 1px solid #000;
+        }
+
+        .table-section th,
+        .table-section td {
+            padding: 0.45rem 0.25rem;
+            text-align: center;
+            font-size: 14px;
+            border: 1px solid #000;
+            color: #000;
+        }
+
+        .table-section th {
+            font-weight: 700;
+            background-color: #f5f5f5;
+        }
+
+        .table-section td {
+            font-weight: 600;
+        }
+
+        .table-section tr:last-child td {
+            font-weight: 700;
+            font-size: 15px;
+        }
+
+        .total-section {
+            font-size: 14px;
+            color: #000;
+            margin-top: 0.8rem;
+            margin-bottom: 6px;
+            padding: 0 0.4rem;
+            font-weight: 500;
+        }
+
+        .payment-info {
+            margin-top: 0.8rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            padding: 0 0.4rem;
+        }
+
+        .payment-info .details {
+            color: #000;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .payment-info .details p {
+            margin: 0.25rem 0;
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 1rem;
+            color: #000;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .centered {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+        }
+
+        .qr-code img {
+            width: 100%;
+            max-width: 140px;
+            border: 1px solid #000;
+            border-radius: 6px;
+            image-rendering: -webkit-optimize-contrast;
+        }
+
+        .money {
+            text-align: right !important;
+            font-weight: 600;
+            width: 95px;
+        }
+
+        .txtValue {
+            font-weight: 600;
+        }
+
+        @media print {
+            body {
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+                color-adjust: exact;
+            }
+
+            .table-section th {
+                background-color: #eaeaea !important;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="invoice-container">
+        <div id="invoice-vi">
+            <div class="title">HÓA ĐƠN</div>
+
+            <div class="header">
+                <h1>PCT BADMINTON</h1>
+                <img src="https://apitest.quanlysan.vn/Uploads/Assets/2025/10/image_picker_A6F2706F-9E7D-45FD-82DA-C3544AEBF8BD-37000-00001872717B00EC_2169729.jpg"
+                    alt="Pickleball Logo" class="logo" />
+            </div>
+
+            <div class="info-section">
+                <p>Chi nhánh: <span class="txtValue">PCT Badminton</span></p>
+                <p>Số điện thoại: <span class="txtValue">0816696595</span></p>
+                <p>Địa chỉ: <span class="txtValue">22 Tôn Thất Tùng - Đống Đa - Hà Nội</span></p>
+                <p>Khách hàng: <span class="txtValue">Hoàng Thu Hằng</span></p>
+                <p>Thời gian: <span class="txtValue">09:19 - 24/10/2025</span></p>
+            </div>
+
+            <table class="table-section">
+                <thead>
+                    <tr>
+                        <th>Thời gian</th>
+                        <th>Dịch vụ</th>
+                        <th>Đ.Giá</th>
+                        <th>SL</th>
+                        <th class="money">Thành Tiền</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>21/10 <br> (Thứ Ba)</td>
+                        <td>Sân 2 <br /> 19:30 - 22:30</td>
+                        <td>20.000</td>
+                        <td>3h</td>
+                        <td class="money">60.000</td>
+                    </tr>
+                    <tr>
+                        <td colspan="4" class="money">Đã thanh toán</td>
+                        <td class="money" style="color: red;">0</td>
+                    </tr>
+                    <tr>
+                        <td colspan="4" class="money">Tổng tiền cần thanh toán</td>
+                        <td class="money" style="color: red;">60.000</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="total-section">
+                <p>Ghi chú:</p>
+            </div>
+
+            <div class="payment-info centered">
+                <div class="details">
+                    <p><strong>Tài khoản ngân hàng</strong></p>
+                    <p>Ngân hàng: <span class="txtValue">ACB</span></p>
+                    <p>Số TK: <span class="txtValue">14100567</span></p>
+                    <p>Tên TK: <span class="txtValue">HOANG THU HANG</span></p>
+                </div>
+                <div class="qr-code">
+                    <img src="https://img.vietqr.io/image/ACB-14100567-qr_only.png?amount=60000,00" alt="QR Code" />
+                </div>
+            </div>
+
+            <div class="footer">
+                <p>© MEWIN - Phần mềm quản lý sân thể thao</p>
+                <p>09:19 - 24/10/2025</p>
+            </div>
+        </div>
+    </div>
+</body>
+
+</html>
