@@ -5,6 +5,8 @@ PODS:
   - path_provider_foundation (0.0.1):
     - Flutter
     - FlutterMacOS
+  - permission_handler_apple (9.3.0):
+    - Flutter
   - print_bluetooth_thermal (0.0.1):
     - Flutter
   - universal_ble (0.0.1):
@@ -15,6 +17,7 @@ DEPENDENCIES:
   - Flutter (from `Flutter`)
   - html_to_image_flutter (from `.symlinks/plugins/html_to_image_flutter/ios`)
   - path_provider_foundation (from `.symlinks/plugins/path_provider_foundation/darwin`)
+  - permission_handler_apple (from `.symlinks/plugins/permission_handler_apple/ios`)
   - print_bluetooth_thermal (from `.symlinks/plugins/print_bluetooth_thermal/ios`)
   - universal_ble (from `.symlinks/plugins/universal_ble/darwin`)
 
@@ -25,6 +28,8 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/html_to_image_flutter/ios"
   path_provider_foundation:
     :path: ".symlinks/plugins/path_provider_foundation/darwin"
+  permission_handler_apple:
+    :path: ".symlinks/plugins/permission_handler_apple/ios"
   print_bluetooth_thermal:
     :path: ".symlinks/plugins/print_bluetooth_thermal/ios"
   universal_ble:
@@ -34,6 +39,7 @@ SPEC CHECKSUMS:
   Flutter: e0871f40cf51350855a761d2e70bf5af5b9b5de7
   html_to_image_flutter: 8ba797c0b26768a41b6b838ed077f59c7980edd5
   path_provider_foundation: 080d55be775b7414fd5a5ef3ac137b97b097e564
+  permission_handler_apple: 4ed2196e43d0651e8ff7ca3483a069d469701f2d
   print_bluetooth_thermal: 28adf527ac4c47e42e268c13d21e5f2abf48ecdd
   universal_ble: ff19787898040d721109c6324472e5dd4bc86adc
 

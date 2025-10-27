@@ -73,19 +73,12 @@ class _HomnePageState extends State<HomnePage> {
     // } catch (e) {
     //   print("Lỗi khi lấy danh sách Bluetooth: $e");
     // }
-    isBluetoothOpen().then(
-      (v) => {
-        if (!mounted) {},
-        if (v)
-          {
-            showBluetoothDevicesPopup(context, (BleDevice device) async {
-              print("selected device: ${device.deviceId}");
+    await isBluetoothOpen();
+    showBluetoothDevicesPopup(context, (BleDevice device) async {
+      print("selected device: ${device.deviceId}");
 
-              await printTest(device);
-            }),
-          },
-      },
-    );
+      await printTest(device);
+    });
   }
 
   static Future<bool> isBluetoothOpen() async {
@@ -137,7 +130,7 @@ class _HomnePageState extends State<HomnePage> {
   }
 
   Future<void> printTest(BleDevice device) async {
-    // bool conecctionStatus = await PrintBluetoothThermal.connectionStatus;
+    bool conecctionStatus = await PrintBluetoothThermal.connectionStatus;
     // if (conecctionStatus) {
     //   List<int> ticket = await testTicket();
     //   final result = await PrintBluetoothThermal.writeBytes(ticket);
@@ -145,10 +138,8 @@ class _HomnePageState extends State<HomnePage> {
     // } else {
     //   //no connected
     // }
-    final bool result = await PrintBluetoothThermal.connect(
-      macPrinterAddress: device.deviceId,
-    );
-    if (result) {
+
+    if (conecctionStatus) {
       List<int> ticket = await testTicket();
       final result = await PrintBluetoothThermal.writeBytes(ticket);
       print("print result: $result");
@@ -421,6 +412,7 @@ class _BluetoothDevicesPopupState extends State<BluetoothDevicesPopup> {
       if (!mounted) return;
       setState(() => _isLoading = false);
       setState(() => _connectedDevice = printer);
+      await PrintBluetoothThermal.connect(macPrinterAddress: printer.deviceId);
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text("Kết nối  thành công!")));
