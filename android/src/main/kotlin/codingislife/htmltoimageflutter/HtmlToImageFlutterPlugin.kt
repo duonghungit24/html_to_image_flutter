@@ -44,12 +44,11 @@ class HtmlToImageFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
         val method = call.method
         val arguments = call.arguments as Map<*, *>
         val rawContent = arguments["content"] as String
-        val delay = arguments["delay"] as Int? ?: 500 // Increased default delay for reliability
+        val delay = arguments["delay"] as Int? ?: 500
         val width = arguments["width"] as Int?
 
         if (method == "convertToImage") {
             webView = WebView(context).apply {
-                // Enable additional WebView settings for complex content
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 settings.databaseEnabled = true
@@ -59,32 +58,51 @@ class HtmlToImageFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
                 settings.allowContentAccess = true
                 isHorizontalScrollBarEnabled = false
                 isVerticalScrollBarEnabled = false
-                setInitialScale(100) // Ensure 1:1 scale for accurate rendering
+                setInitialScale(100)
             }
             WebView.enableSlowWholeDocumentDraw()
 
             val displaySize = getDisplaySize()
             val targetWidth = width ?: displaySize.width
 
+            // ✅ HTML FIX: tăng độ đậm chữ, chống mờ, chống đen
             val fullHtml = """
                 <html>
                 <head>
-                    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
                     <style>
-                        body {
+                        html, body {
                             margin: 0;
                             padding: 0;
-                            width: 100%;
-                            max-width: ${targetWidth}px;
-                            overflow-wrap: break-word;
-                            word-wrap: break-word;
-                            box-sizing: border-box;
-                            overflow: hidden;
+                            background: #ffffff;
+                            color: #000000;
+                            font-family: -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
+                            -webkit-font-smoothing: none;
+                            text-rendering: geometricPrecision;
+                            image-rendering: -webkit-optimize-contrast;
+                            transform: scale(1.0001);
+                            font-weight: 600;
+                            letter-spacing: 0px;
+                        }
+                        body, p, span, div, td, th {
+                            color: #000 !important;
+                            font-weight: 700 !important;
                         }
                         img {
+                            image-rendering: crisp-edges !important;
+                            -webkit-optimize-contrast: 1.5;
                             max-width: 100%;
                             height: auto;
                             display: block;
+                        }
+                        table {
+                            border-collapse: collapse;
+                            width: 100%;
+                        }
+                        td, th {
+                            border: 1px solid #99999955;
+                            padding: 6px 8px;
+                            text-align: left;
                         }
                         * {
                             box-sizing: border-box;
@@ -100,7 +118,6 @@ class HtmlToImageFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
             webView.webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView, url: String) {
                     CoroutineScope(Dispatchers.IO).launch {
-                        // Wait for content to be fully rendered
                         checkContentRendered(view, delay.toLong(), result, targetWidth)
                     }
                 }
@@ -114,7 +131,6 @@ class HtmlToImageFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
                 }
             }
 
-            // Set initial size to avoid clipping
             webView.measure(
                 View.MeasureSpec.makeMeasureSpec(targetWidth, View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
@@ -126,76 +142,62 @@ class HtmlToImageFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
         }
     }
 
-    private fun checkContentRendered(webView: WebView, delay: Long, result: MethodChannel.Result, targetWidth: Int) {
+    private fun checkContentRendered(
+        webView: WebView,
+        delay: Long,
+        result: MethodChannel.Result,
+        targetWidth: Int
+    ) {
         Handler(Looper.getMainLooper()).postDelayed({
             webView.evaluateJavascript(
                 """
                 (function() {
-                    var images = document.getElementsByTagName('img');
-                    var loaded = true;
-                    for (var i = 0; i < images.length; i++) {
-                        if (!images[i].complete) {
-                            loaded = false;
-                            break;
-                        }
+                    var imgs = document.images;
+                    for (var i = 0; i < imgs.length; i++) {
+                        if (!imgs[i].complete) return JSON.stringify({ready: false});
                     }
-                    return {
+                    return JSON.stringify({
+                        ready: true,
                         width: document.body.scrollWidth,
-                        height: document.body.scrollHeight,
-                        fullyLoaded: loaded
-                    };
+                        height: document.body.scrollHeight
+                    });
                 })();
                 """
             ) { value ->
                 try {
-                    val json = JSONArray("[$value]").getJSONObject(0)
-                    val contentWidth = json.getDouble("width").absoluteValue.toInt()
-                    val contentHeight = json.getDouble("height").absoluteValue.toInt()
-                    val fullyLoaded = json.getBoolean("fullyLoaded")
+                    val json = org.json.JSONObject(value)
+                    val ready = json.optBoolean("ready", false)
+                    val contentWidth = json.optDouble("width", 0.0).absoluteValue.toInt()
+                    val contentHeight = json.optDouble("height", 0.0).absoluteValue.toInt()
 
-                    if (!fullyLoaded && delay < 5000) {
-                        // Retry if content (e.g., images) is not fully loaded, up to 5 seconds
+                    if (!ready && delay < 4000) {
                         checkContentRendered(webView, delay + 500, result, targetWidth)
                         return@evaluateJavascript
                     }
 
                     if (contentWidth <= 0 || contentHeight <= 0) {
-                        result.error("INVALID_SIZE", "Content size is invalid: $contentWidth x $contentHeight", null)
+                        result.error("INVALID_SIZE", "Invalid size: $contentWidth x $contentHeight", null)
                         return@evaluateJavascript
                     }
 
-                    // Ensure WebView is sized correctly
                     webView.measure(
                         View.MeasureSpec.makeMeasureSpec(contentWidth, View.MeasureSpec.EXACTLY),
                         View.MeasureSpec.makeMeasureSpec(contentHeight, View.MeasureSpec.EXACTLY)
                     )
                     webView.layout(0, 0, contentWidth, contentHeight)
 
-                    val bitmap = webView.toBitmap(contentWidth.toDouble(), contentHeight.toDouble())
-                    if (bitmap != null && !isBitmapWhite(bitmap)) {
+                    // ✅ Xuất ảnh độ phân giải cao gấp đôi
+                    val bitmap = webView.toBitmap(contentWidth * 2.0, contentHeight * 2.0)
+                    if (bitmap != null) {
                         result.success(bitmap.toByteArray())
                     } else {
-                        result.error("BITMAP_NULL", "Failed to generate valid image", null)
+                        result.error("BITMAP_ERROR", "Failed to capture bitmap", null)
                     }
                 } catch (e: Exception) {
-                    result.error("EVALUATION_ERROR", "JavaScript evaluation failed: ${e.message}", null)
+                    result.error("EVALUATION_ERROR", "JS eval failed: ${e.message}", null)
                 }
             }
         }, delay)
-    }
-
-    private fun isBitmapWhite(bitmap: Bitmap): Boolean {
-        // Check a sample of pixels to determine if the bitmap is mostly white/transparent
-        val pixels = IntArray(bitmap.width * bitmap.height)
-        bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
-        var nonWhiteCount = 0
-        for (pixel in pixels) {
-            if (pixel != 0 && pixel != -1) { // Not transparent or white
-                nonWhiteCount++
-            }
-            if (nonWhiteCount > 10) return false // Early exit if enough non-white pixels
-        }
-        return true
     }
 
     @Suppress("DEPRECATION")
@@ -228,21 +230,20 @@ class HtmlToImageFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
     }
 }
 
-fun WebView.toBitmap(offsetWidth: Double, offsetHeight: Double): Bitmap? {
-    if (offsetHeight > 0 && offsetWidth > 0) {
-        val width = offsetWidth.absoluteValue.toInt()
-        val height = offsetHeight.absoluteValue.toInt()
-        measure(
-            View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
-            View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY)
-        )
-        layout(0, 0, width, height)
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-        draw(canvas)
-        return bitmap
-    }
-    return null
+fun WebView.toBitmap(width: Double, height: Double): Bitmap? {
+    val w = width.absoluteValue.toInt()
+    val h = height.absoluteValue.toInt()
+    if (w <= 0 || h <= 0) return null
+    measure(
+        View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
+        View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY)
+    )
+    layout(0, 0, w, h)
+    val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    canvas.drawColor(android.graphics.Color.WHITE) // ✅ tránh nền đen
+    draw(canvas)
+    return bitmap
 }
 
 fun Bitmap.toByteArray(): ByteArray {

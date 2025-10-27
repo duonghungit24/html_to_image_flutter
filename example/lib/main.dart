@@ -1,8 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/material.dart';
 import 'package:html_to_image_flutter/html_to_image_flutter.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
 import 'package:image/image.dart' as img;
 import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
@@ -38,7 +38,7 @@ class MyApp extends StatelessWidget {
         // tested with just a hot reload.
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
       ),
-      home: BluetoothDevicesPopup(),
+      home: HomnePage(),
     );
   }
 }
@@ -59,19 +59,53 @@ class _HomnePageState extends State<HomnePage> {
   void initState() {
     super.initState();
     print("init home");
-    _loadBluetoothList();
+    // _loadBluetoothList();
   }
 
   Future<void> _loadBluetoothList() async {
+    // try {
+    //   final List<BluetoothInfo> listResult =
+    //       await PrintBluetoothThermal.pairedBluetooths;
+    //   print("listResult ${listResult.length}");
+    //   setState(() {
+    //     list = listResult;
+    //   });
+    // } catch (e) {
+    //   print("Lỗi khi lấy danh sách Bluetooth: $e");
+    // }
+    isBluetoothOpen().then(
+      (v) => {
+        if (!mounted) {},
+        if (v)
+          {
+            showBluetoothDevicesPopup(context, (BleDevice device) async {
+              print("selected device: ${device.deviceId}");
+
+              await printTest(device);
+            }),
+          },
+      },
+    );
+  }
+
+  static Future<bool> isBluetoothOpen() async {
     try {
-      final List<BluetoothInfo> listResult =
-          await PrintBluetoothThermal.pairedBluetooths;
-      print("listResult ${listResult.length}");
-      setState(() {
-        list = listResult;
-      });
+      var status =
+          await [
+            Permission.bluetooth,
+            Permission.bluetoothScan,
+            Permission.bluetoothConnect,
+            Permission.location,
+          ].request();
+      // if (status.values.every((i) => i == PermissionStatus.permanentlyDenied)) {
+      //   openAppSettings();
+      // }
+      return status.values.any(
+        (i) =>
+            i == PermissionStatus.granted || i == PermissionStatus.provisional,
+      );
     } catch (e) {
-      print("Lỗi khi lấy danh sách Bluetooth: $e");
+      return false;
     }
   }
 
@@ -102,14 +136,22 @@ class _HomnePageState extends State<HomnePage> {
     }
   }
 
-  Future<void> printTest() async {
-    bool conecctionStatus = await PrintBluetoothThermal.connectionStatus;
-    if (conecctionStatus) {
+  Future<void> printTest(BleDevice device) async {
+    // bool conecctionStatus = await PrintBluetoothThermal.connectionStatus;
+    // if (conecctionStatus) {
+    //   List<int> ticket = await testTicket();
+    //   final result = await PrintBluetoothThermal.writeBytes(ticket);
+    //   print("print result: $result");
+    // } else {
+    //   //no connected
+    // }
+    final bool result = await PrintBluetoothThermal.connect(
+      macPrinterAddress: device.deviceId,
+    );
+    if (result) {
       List<int> ticket = await testTicket();
       final result = await PrintBluetoothThermal.writeBytes(ticket);
       print("print result: $result");
-    } else {
-      //no connected
     }
   }
 
@@ -226,20 +268,20 @@ class _HomnePageState extends State<HomnePage> {
                       padding: const EdgeInsets.only(top: 8.0, left: 8),
                       child: Row(
                         children: [
-                          ElevatedButton.icon(
-                            onPressed: printTest,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.orangeAccent,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                            ),
-                            icon: const Icon(Icons.print, color: Colors.white),
-                            label: const Text(
-                              "In thử",
-                              style: TextStyle(color: Colors.white),
-                            ),
-                          ),
+                          // ElevatedButton.icon(
+                          //   onPressed: printTest,
+                          //   style: ElevatedButton.styleFrom(
+                          //     backgroundColor: Colors.orangeAccent,
+                          //     shape: RoundedRectangleBorder(
+                          //       borderRadius: BorderRadius.circular(8),
+                          //     ),
+                          //   ),
+                          //   icon: const Icon(Icons.print, color: Colors.white),
+                          //   label: const Text(
+                          //     "In thử",
+                          //     style: TextStyle(color: Colors.white),
+                          //   ),
+                          // ),
                           const SizedBox(width: 12),
                           ElevatedButton.icon(
                             onPressed: () {
@@ -280,10 +322,23 @@ class _HomnePageState extends State<HomnePage> {
   }
 }
 
+Future<void> showBluetoothDevicesPopup(
+  BuildContext context,
+  void Function(BleDevice)? onSelectPrinter,
+) async {
+  return showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) {
+      return BluetoothDevicesPopup(onSelectPrinter: onSelectPrinter);
+    },
+  );
+}
+
 class BluetoothDevicesPopup extends StatefulWidget {
   const BluetoothDevicesPopup({super.key, this.onSelectPrinter});
 
-  final void Function()? onSelectPrinter;
+  final void Function(BleDevice)? onSelectPrinter;
 
   @override
   State<BluetoothDevicesPopup> createState() => _BluetoothDevicesPopupState();
@@ -366,26 +421,24 @@ class _BluetoothDevicesPopupState extends State<BluetoothDevicesPopup> {
       if (!mounted) return;
       setState(() => _isLoading = false);
       setState(() => _connectedDevice = printer);
-
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text("Kết nốithành công!")));
+      ).showSnackBar(SnackBar(content: Text("Kết nối  thành công!")));
     } catch (_) {
       setState(() => _isLoading = false);
       setState(() => _connectedDevice = null);
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text("Kết nối that bai!")));
+      ).showSnackBar(SnackBar(content: Text("Kết nối  that bai!")));
     }
   }
 
   void _disconnectPrinter(BleDevice printer) {
     UniversalBle.disconnect(printer.deviceId);
     setState(() => _connectedDevice = null);
-
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(SnackBar(content: Text("ngat Kết nối thanh cong!")));
+    ).showSnackBar(SnackBar(content: Text("ngat Kết nối  thành công!")));
   }
 
   @override
@@ -394,13 +447,16 @@ class _BluetoothDevicesPopupState extends State<BluetoothDevicesPopup> {
       insetPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 20),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       backgroundColor: Colors.white,
-      title: InkWell(
-        onTap: startScan,
-        child: Padding(
-          padding: EdgeInsets.all(4),
-          child: Icon(Icons.refresh, color: Colors.black),
-        ),
-      ),
+      title:
+          _isLoading
+              ? null
+              : InkWell(
+                onTap: startScan,
+                child: Padding(
+                  padding: EdgeInsets.all(4),
+                  child: Icon(Icons.refresh, color: Colors.black),
+                ),
+              ),
       content: SizedBox(
         width: 400,
         child: Stack(
@@ -429,7 +485,10 @@ class _BluetoothDevicesPopupState extends State<BluetoothDevicesPopup> {
                 child: Container(
                   color: Colors.white70,
                   child: Center(
-                    child: CircularProgressIndicator(strokeWidth: 4),
+                    child: CircularProgressIndicator(
+                      strokeWidth: 4,
+                      color: Colors.blue,
+                    ),
                   ),
                 ),
               ),
@@ -447,7 +506,7 @@ class _BluetoothDevicesPopupState extends State<BluetoothDevicesPopup> {
     return Card(
       margin: EdgeInsets.symmetric(vertical: 8),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      color: Colors.red,
+      color: Colors.cyan,
       elevation: 0,
       child: Padding(
         padding: EdgeInsets.symmetric(vertical: 6, horizontal: 8),
@@ -463,19 +522,21 @@ class _BluetoothDevicesPopupState extends State<BluetoothDevicesPopup> {
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  ElevatedButton.icon(
-                    onPressed: () => _connectPrinter(printer),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.orangeAccent,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                    icon: const Icon(Icons.print, color: Colors.white),
-                    label: Text(
-                      isConnected ? "da ket noi" : "ket noi",
-                      style: TextStyle(color: Colors.black),
-                    ),
+                  ElevatedButton(
+                    onPressed:
+                        _isLoading ? null : () => _connectPrinter(printer),
+
+                    child:
+                        _isLoading && _connectedDevice == printer
+                            ? SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                            : Text(isConnected ? 'da ket noi' : 'ket noi'),
                   ),
                 ],
               ),
@@ -486,7 +547,11 @@ class _BluetoothDevicesPopupState extends State<BluetoothDevicesPopup> {
                 child: Row(
                   children: [
                     ElevatedButton.icon(
-                      onPressed: () => {},
+                      onPressed:
+                          () => {
+                            Navigator.of(context).pop(),
+                            widget.onSelectPrinter?.call(printer),
+                          },
                       icon: const Icon(Icons.print, color: Colors.white),
                       label: Text('in', style: TextStyle(color: Colors.white)),
                       style: ElevatedButton.styleFrom(
@@ -501,7 +566,7 @@ class _BluetoothDevicesPopupState extends State<BluetoothDevicesPopup> {
                       onPressed: () => _disconnectPrinter(printer),
                       icon: const Icon(Icons.link_off, color: Colors.white),
                       label: Text(
-                        'Ngat ket noi',
+                        "Ngat ket noi",
                         style: TextStyle(color: Colors.white),
                       ),
                       style: ElevatedButton.styleFrom(

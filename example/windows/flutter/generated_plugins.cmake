@@ -3,6 +3,7 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
+  permission_handler_windows
   print_bluetooth_thermal
   universal_ble
 )
