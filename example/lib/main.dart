@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/material.dart';
 import 'package:html_to_image_flutter/html_to_image_flutter.dart';
 import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
 import 'package:image/image.dart' as img;
 import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
+import 'package:universal_ble/universal_ble.dart';
 
 void main() {
   runApp(const MyApp());
@@ -35,7 +38,7 @@ class MyApp extends StatelessWidget {
         // tested with just a hot reload.
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
       ),
-      home: HomnePage(),
+      home: BluetoothDevicesPopup(),
     );
   }
 }
@@ -63,7 +66,7 @@ class _HomnePageState extends State<HomnePage> {
     try {
       final List<BluetoothInfo> listResult =
           await PrintBluetoothThermal.pairedBluetooths;
-
+      print("listResult ${listResult.length}");
       setState(() {
         list = listResult;
       });
@@ -117,14 +120,14 @@ class _HomnePageState extends State<HomnePage> {
       width: 384,
     );
     final profile = await CapabilityProfile.load();
-    final generator = Generator(PaperSize.mm80, profile);
+    final generator = Generator(PaperSize.mm58, profile);
     // final ByteData data = await rootBundle.load('assets/icons/test.jpg');
     // final Uint8List bytesImg = data.buffer.asUint8List();
 
     final grayscaleImage = img.grayscale(img.decodeImage(imageBytes)!);
     final optimizedImage = _optimizeImageForThermalPrint(
       grayscaleImage,
-      PaperSize.mm80.width,
+      PaperSize.mm58.width,
     );
 
     bytes += generator.setStyles(
@@ -272,6 +275,247 @@ class _HomnePageState extends State<HomnePage> {
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+class BluetoothDevicesPopup extends StatefulWidget {
+  const BluetoothDevicesPopup({super.key, this.onSelectPrinter});
+
+  final void Function()? onSelectPrinter;
+
+  @override
+  State<BluetoothDevicesPopup> createState() => _BluetoothDevicesPopupState();
+}
+
+class _BluetoothDevicesPopupState extends State<BluetoothDevicesPopup> {
+  bool _isLoading = false;
+  StreamSubscription<BleDevice>? _stream;
+  final List<BleDevice> _devices = [];
+  BleDevice? _connectedDevice;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => startScan());
+  }
+
+  @override
+  void dispose() {
+    stop();
+    super.dispose();
+  }
+
+  void stop() {
+    UniversalBle.stopScan();
+    _stream?.cancel();
+  }
+
+  void startScan() async {
+    try {
+      _devices.clear();
+
+      _isLoading = true;
+
+      if (mounted) setState(() {});
+      final systemDevices = await UniversalBle.getSystemDevices(
+        withServices: [],
+      );
+      _connectedDevice = systemDevices.firstOrNull;
+      _devices.addAll(systemDevices);
+      _isLoading = systemDevices.isEmpty;
+      if (mounted) setState(() {});
+
+      _stream?.cancel();
+      _stream = UniversalBle.scanStream.listen((result) {
+        if ((result.name ?? '').isEmpty) return;
+        print("${result.services}");
+        int index = _devices.indexWhere((e) => e.deviceId == result.deviceId);
+        if (index == -1) {
+          _devices.add(result);
+        } else {
+          if (result.name == null && _devices[index].name != null) {
+            result.name = _devices[index].name;
+          }
+          _devices[index] = result;
+        }
+        _isLoading = false;
+        if (mounted) setState(() {});
+      });
+
+      await UniversalBle.startScan();
+
+      // stop after a few seconds
+      Future.delayed(const Duration(seconds: 10), stop);
+    } catch (e) {
+      debugPrint("BLE scan error: $e");
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _connectPrinter(BleDevice printer) async {
+    try {
+      if (_isLoading) return;
+      setState(() {
+        _isLoading = true;
+        _connectedDevice = printer;
+      });
+      await UniversalBle.connect(printer.deviceId);
+
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      setState(() => _connectedDevice = printer);
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Kết nốithành công!")));
+    } catch (_) {
+      setState(() => _isLoading = false);
+      setState(() => _connectedDevice = null);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Kết nối that bai!")));
+    }
+  }
+
+  void _disconnectPrinter(BleDevice printer) {
+    UniversalBle.disconnect(printer.deviceId);
+    setState(() => _connectedDevice = null);
+
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text("ngat Kết nối thanh cong!")));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      insetPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      backgroundColor: Colors.white,
+      title: InkWell(
+        onTap: startScan,
+        child: Padding(
+          padding: EdgeInsets.all(4),
+          child: Icon(Icons.refresh, color: Colors.black),
+        ),
+      ),
+      content: SizedBox(
+        width: 400,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                minHeight: 200,
+                maxHeight: MediaQuery.of(context).size.height * 0.8,
+              ),
+              child:
+                  _devices.isEmpty && !_isLoading
+                      ? Padding(
+                        padding: EdgeInsets.symmetric(vertical: 40),
+                        child: Center(child: Text('chua co thong tin')),
+                      )
+                      : ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: _devices.length,
+                        itemBuilder:
+                            (_, i) => _buildPrinterCard(_devices[i], context),
+                      ),
+            ),
+            if (_isLoading)
+              Positioned.fill(
+                child: Container(
+                  color: Colors.white70,
+                  child: Center(
+                    child: CircularProgressIndicator(strokeWidth: 4),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPrinterCard(BleDevice printer, BuildContext context) {
+    final isConnected =
+        _connectedDevice != null &&
+        _connectedDevice?.deviceId == printer.deviceId;
+
+    return Card(
+      margin: EdgeInsets.symmetric(vertical: 8),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      color: Colors.red,
+      elevation: 0,
+      child: Padding(
+        padding: EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ListTile(
+              dense: true,
+              leading: Icon(Icons.print, color: Colors.blueAccent),
+              title: Text(printer.name ?? ''),
+              subtitle: Text(printer.deviceId),
+              contentPadding: EdgeInsets.zero,
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ElevatedButton.icon(
+                    onPressed: () => _connectPrinter(printer),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.orangeAccent,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    icon: const Icon(Icons.print, color: Colors.white),
+                    label: Text(
+                      isConnected ? "da ket noi" : "ket noi",
+                      style: TextStyle(color: Colors.black),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (isConnected)
+              Padding(
+                padding: EdgeInsets.only(top: 8, left: 8),
+                child: Row(
+                  children: [
+                    ElevatedButton.icon(
+                      onPressed: () => {},
+                      icon: const Icon(Icons.print, color: Colors.white),
+                      label: Text('in', style: TextStyle(color: Colors.white)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.orangeAccent,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+                    SizedBox(width: 12),
+                    ElevatedButton.icon(
+                      onPressed: () => _disconnectPrinter(printer),
+                      icon: const Icon(Icons.link_off, color: Colors.white),
+                      label: Text(
+                        'Ngat ket noi',
+                        style: TextStyle(color: Colors.white),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.redAccent,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }

@@ -39,6 +39,7 @@ dependencies:
   image: ^4.5.4
   html_to_image_flutter: 
     path: ../
+  universal_ble: ^0.21.1
 
 dev_dependencies:
   flutter_test:
