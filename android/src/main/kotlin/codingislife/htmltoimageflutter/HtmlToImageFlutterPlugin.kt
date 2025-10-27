@@ -42,162 +42,192 @@ class HtmlToImageFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
     @SuppressLint("SetJavaScriptEnabled")
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         val method = call.method
-        val arguments = call.arguments as Map<*, *>
-        val rawContent = arguments["content"] as String
-        val delay = arguments["delay"] as Int? ?: 500
-        val width = arguments["width"] as Int?
+        val args = call.arguments as Map<*, *>
 
-        if (method == "convertToImage") {
-            webView = WebView(context).apply {
-                settings.javaScriptEnabled = true
-                settings.domStorageEnabled = true
-                settings.databaseEnabled = true
-                settings.useWideViewPort = true
-                settings.loadWithOverviewMode = true
-                settings.allowFileAccess = true
-                settings.allowContentAccess = true
-                isHorizontalScrollBarEnabled = false
-                isVerticalScrollBarEnabled = false
-                setInitialScale(100)
+        if (method != "convertToImage") {
+            result.notImplemented()
+            return
+        }
+
+        val rawContent = args["content"] as String
+        val delay = (args["delay"] as Int?) ?: 500
+        val widthArg = args["width"] as Int?
+        val displaySize = getDisplaySize()
+        val targetWidth = (widthArg ?: displaySize.width)
+
+        webView = WebView(context).apply {
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.useWideViewPort = true
+            settings.loadWithOverviewMode = true
+            settings.allowFileAccess = true
+            settings.allowContentAccess = true
+            isHorizontalScrollBarEnabled = false
+            isVerticalScrollBarEnabled = false
+            settings.setSupportZoom(false)
+            settings.displayZoomControls = false
+            settings.textZoom = 100
+            webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+            settings.useWideViewPort = true
+            settings.loadWithOverviewMode = true
+            setInitialScale(100)
+        }
+        WebView.enableSlowWholeDocumentDraw()
+
+        val scaleFactor = 2 // tăng độ nét x2 như iOS
+        val effectiveWidth = targetWidth * scaleFactor
+
+      val fullHtml = """
+        <html>
+        <head>
+            <meta name="viewport" content="width=${targetWidth}px, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+            <style>
+                html, body {
+                    margin: 0;
+                    padding-top: 6px; /* tránh cắt top */
+                    width: ${targetWidth}px;
+                    max-width: ${targetWidth}px;
+                    background: #fff;
+                    overflow: hidden;
+                    -webkit-print-color-adjust: exact !important;
+                    print-color-adjust: exact !important;
+                }
+
+                * {
+                    box-sizing: border-box;
+                    image-rendering: -webkit-optimize-contrast;
+                    -webkit-font-smoothing: none;
+                    font-smooth: never;
+                    text-rendering: geometricPrecision;
+                }
+
+                table {
+                    border-collapse: separate !important; /* ✅ không dùng collapse nữa */
+                    border-spacing: 0 !important;         /* ✅ để các ô vẫn liền nhau */
+                }
+
+                th, td {
+                    border: 1px solid #000 !important;
+                }
+
+                img {
+                    max-width: 100%;
+                    height: auto;
+                    display: block;
+                }
+            </style>
+        </head>
+        <body>
+            $rawContent
+        </body>
+        </html>
+        """.trimIndent()
+
+        webView.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView, url: String) {
+                CoroutineScope(Dispatchers.IO).launch {
+                    waitAndCapture(view, delay, effectiveWidth, result)
+                }
             }
-            WebView.enableSlowWholeDocumentDraw()
 
-            val displaySize = getDisplaySize()
-            val targetWidth = width ?: displaySize.width
+            override fun onReceivedError(
+                view: WebView?,
+                request: WebResourceRequest?,
+                error: WebResourceError?
+            ) {
+                result.error("WEBVIEW_ERROR", "Failed to load: ${error?.description}", null)
+            }
+        }
 
-            // ✅ HTML FIX: tăng độ đậm chữ, chống mờ, chống đen
-            val fullHtml = """
-                <html>
-                <head>
-                    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-                    <style>
-                        html, body {
-                            margin: 0;
-                            padding: 0;
-                            background: #ffffff;
-                            color: #000000;
-                            font-family: -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
-                            -webkit-font-smoothing: none;
-                            text-rendering: geometricPrecision;
-                            image-rendering: -webkit-optimize-contrast;
-                            transform: scale(1.0001);
-                            font-weight: 600;
-                            letter-spacing: 0px;
-                        }
-                        body, p, span, div, td, th {
-                            color: #000 !important;
-                            font-weight: 700 !important;
-                        }
-                        img {
-                            image-rendering: crisp-edges !important;
-                            -webkit-optimize-contrast: 1.5;
-                            max-width: 100%;
-                            height: auto;
-                            display: block;
-                        }
-                        table {
-                            border-collapse: collapse;
-                            width: 100%;
-                        }
-                        td, th {
-                            border: 1px solid #99999955;
-                            padding: 6px 8px;
-                            text-align: left;
-                        }
-                        * {
-                            box-sizing: border-box;
-                        }
-                    </style>
-                </head>
-                <body>
-                    $rawContent
-                </body>
-                </html>
-            """.trimIndent()
+        webView.loadDataWithBaseURL(null, fullHtml, "text/html", "UTF-8", null)
+    }
 
-            webView.webViewClient = object : WebViewClient() {
-                override fun onPageFinished(view: WebView, url: String) {
-                    CoroutineScope(Dispatchers.IO).launch {
-                        checkContentRendered(view, delay.toLong(), result, targetWidth)
+    private fun waitAndCapture(webView: WebView, delay: Int, width: Int, result: MethodChannel.Result) {
+        // Gọi đệ quy tối đa 3 lần nếu render chưa xong
+        fun tryCapture(attempt: Int) {
+            Handler(Looper.getMainLooper()).postDelayed({
+                webView.evaluateJavascript(
+                    """
+                    (function() {
+                        return {
+                            ready: document.readyState,
+                            width: document.body.scrollWidth,
+                            height: document.body.scrollHeight
+                        };
+                    })();
+                    """
+                ) { value ->
+                    try {
+                        val json = JSONArray("[$value]").getJSONObject(0)
+                        val ready = json.getString("ready")
+                        val htmlWidth = json.getDouble("width").toInt().absoluteValue
+                        val htmlHeight = json.getDouble("height").toInt().absoluteValue
+
+                        if (ready != "complete" || htmlHeight == 0) {
+                            if (attempt < 3) {
+                                tryCapture(attempt + 1)
+                            } else {
+                                result.error("INVALID_STATE", "Document not ready or height=0", null)
+                            }
+                            return@evaluateJavascript
+                        }
+
+                        val bitmap = captureWebView(webView, htmlWidth, htmlHeight)
+                        if (bitmap == null) {
+                            if (attempt < 3) {
+                                tryCapture(attempt + 1)
+                            } else {
+                                result.error("BITMAP_NULL", "Bitmap capture failed", null)
+                            }
+                            return@evaluateJavascript
+                        }
+
+                        // Nếu toàn trắng => chưa vẽ xong, thử lại
+                        if (isMostlyWhite(bitmap) && attempt < 3) {
+                            tryCapture(attempt + 1)
+                            return@evaluateJavascript
+                        }
+
+                        result.success(bitmap.toByteArray())
+
+                    } catch (e: Exception) {
+                        result.error("EVALUATION_ERROR", e.message, null)
                     }
                 }
+            }, delay.toLong())
+        }
 
-                override fun onReceivedError(
-                    view: WebView?,
-                    request: WebResourceRequest?,
-                    error: WebResourceError?
-                ) {
-                    result.error("WEBVIEW_ERROR", "Failed to load content: ${error?.description}", null)
-                }
-            }
+        tryCapture(0)
+    }
 
+    private fun captureWebView(webView: WebView, width: Int, height: Int): Bitmap? {
+        return try {
+            if (width <= 0 || height <= 0) return null
             webView.measure(
-                View.MeasureSpec.makeMeasureSpec(targetWidth, View.MeasureSpec.EXACTLY),
-                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+                View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY)
             )
-            webView.layout(0, 0, targetWidth, webView.measuredHeight)
-            webView.loadDataWithBaseURL(null, fullHtml, "text/html", "UTF-8", null)
-        } else {
-            result.notImplemented()
+            webView.layout(0, 0, width, height)
+            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bitmap)
+            webView.draw(canvas)
+            bitmap
+        } catch (e: Exception) {
+            null
         }
     }
 
-    private fun checkContentRendered(
-        webView: WebView,
-        delay: Long,
-        result: MethodChannel.Result,
-        targetWidth: Int
-    ) {
-        Handler(Looper.getMainLooper()).postDelayed({
-            webView.evaluateJavascript(
-                """
-                (function() {
-                    var imgs = document.images;
-                    for (var i = 0; i < imgs.length; i++) {
-                        if (!imgs[i].complete) return JSON.stringify({ready: false});
-                    }
-                    return JSON.stringify({
-                        ready: true,
-                        width: document.body.scrollWidth,
-                        height: document.body.scrollHeight
-                    });
-                })();
-                """
-            ) { value ->
-                try {
-                    val json = org.json.JSONObject(value)
-                    val ready = json.optBoolean("ready", false)
-                    val contentWidth = json.optDouble("width", 0.0).absoluteValue.toInt()
-                    val contentHeight = json.optDouble("height", 0.0).absoluteValue.toInt()
 
-                    if (!ready && delay < 4000) {
-                        checkContentRendered(webView, delay + 500, result, targetWidth)
-                        return@evaluateJavascript
-                    }
-
-                    if (contentWidth <= 0 || contentHeight <= 0) {
-                        result.error("INVALID_SIZE", "Invalid size: $contentWidth x $contentHeight", null)
-                        return@evaluateJavascript
-                    }
-
-                    webView.measure(
-                        View.MeasureSpec.makeMeasureSpec(contentWidth, View.MeasureSpec.EXACTLY),
-                        View.MeasureSpec.makeMeasureSpec(contentHeight, View.MeasureSpec.EXACTLY)
-                    )
-                    webView.layout(0, 0, contentWidth, contentHeight)
-
-                    // ✅ Xuất ảnh độ phân giải cao gấp đôi
-                    val bitmap = webView.toBitmap(contentWidth * 2.0, contentHeight * 2.0)
-                    if (bitmap != null) {
-                        result.success(bitmap.toByteArray())
-                    } else {
-                        result.error("BITMAP_ERROR", "Failed to capture bitmap", null)
-                    }
-                } catch (e: Exception) {
-                    result.error("EVALUATION_ERROR", "JS eval failed: ${e.message}", null)
-                }
-            }
-        }, delay)
+    private fun isMostlyWhite(bitmap: Bitmap): Boolean {
+        val pixels = IntArray(bitmap.width * bitmap.height)
+        bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+        var darkCount = 0
+        for (i in pixels.indices step 5000) {
+            val p = pixels[i]
+            if (p != -1 && p != 0) darkCount++
+            if (darkCount > 10) return false
+        }
+        return true
     }
 
     @Suppress("DEPRECATION")
@@ -213,10 +243,7 @@ class HtmlToImageFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
         activity = binding.activity
-        webView = WebView(activity.applicationContext).apply {
-            minimumHeight = 1
-            minimumWidth = 1
-        }
+        webView = WebView(activity.applicationContext)
     }
 
     override fun onDetachedFromActivityForConfigChanges() {}
@@ -228,22 +255,6 @@ class HtmlToImageFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         channel.setMethodCallHandler(null)
     }
-}
-
-fun WebView.toBitmap(width: Double, height: Double): Bitmap? {
-    val w = width.absoluteValue.toInt()
-    val h = height.absoluteValue.toInt()
-    if (w <= 0 || h <= 0) return null
-    measure(
-        View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
-        View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY)
-    )
-    layout(0, 0, w, h)
-    val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bitmap)
-    canvas.drawColor(android.graphics.Color.WHITE) // ✅ tránh nền đen
-    draw(canvas)
-    return bitmap
 }
 
 fun Bitmap.toByteArray(): ByteArray {
